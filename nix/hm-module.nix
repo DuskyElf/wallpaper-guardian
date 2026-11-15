@@ -106,10 +106,10 @@ in
         default = true;
         description = "Run `fetch` from a systemd timer.";
       };
-      onBoot = lib.mkOption {
+      delay = lib.mkOption {
         type = lib.types.str;
         default = "15min";
-        description = "Delay after boot before the first fetch.";
+        description = "Delay after the session starts before the first fetch.";
       };
       interval = lib.mkOption {
         type = lib.types.str;
@@ -144,13 +144,6 @@ in
       };
     };
 
-    resume = {
-      enable = lib.mkOption {
-        type = lib.types.bool;
-        default = true;
-        description = "Apply a wallpaper after resume from suspend.";
-      };
-    };
   };
 
   config = lib.mkIf cfg.enable {
@@ -213,24 +206,6 @@ in
           Install.WantedBy = [ cfg.target ];
         };
       })
-
-      (lib.mkIf cfg.resume.enable {
-        wallpaper-resume = {
-          Unit = {
-            Description = "Re-apply the wallpaper after suspend";
-            # suspend.target is reached on the way out, so this runs on
-            # resume. sleep.target is the pre-suspend hook.
-            After = [ "suspend.target" ];
-          };
-          Service = {
-            Type = "oneshot";
-            Environment = environment;
-            ExecStart = "${exe}${configArgument} next";
-            KillMode = "process";
-          };
-          Install.WantedBy = [ "suspend.target" ];
-        };
-      })
     ];
 
     systemd.user.timers = lib.mkMerge [
@@ -242,9 +217,10 @@ in
           };
           # OnUnitActiveSec uses the monotonic clock, so suspend time does not
           # count and a fetch fires shortly after wake when the interval
-          # passed while asleep. Persistent= would only help at boot.
+          # passed while asleep. OnActiveSec counts from timer start, which is
+          # the graphical session, not boot.
           Timer = {
-            OnBootSec = cfg.fetch.onBoot;
+            OnActiveSec = cfg.fetch.delay;
             OnUnitActiveSec = cfg.fetch.interval;
           };
           Install.WantedBy = [ cfg.target ];

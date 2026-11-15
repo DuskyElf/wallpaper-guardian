@@ -41,30 +41,34 @@ carries the photo's location and description for overlays.
 ```
 
 The module only needs home-manager. It installs the binary, writes
-`$XDG_CONFIG_HOME/wallpaper-guardian/config.toml`, and creates four services
-plus two timers: fetch, rotation, session-start apply, and resume apply.
+`$XDG_CONFIG_HOME/wallpaper-guardian/config.toml`, and creates three services
+plus two timers: fetch, rotation, and the session-start apply.
 
 | Option | Default | Meaning |
 | --- | --- | --- |
 | `enable` | `false` | Install and run everything |
-| `package` | flake package | Package with the `wallpaper-guardian` binary |
+| `package` | this flake's package | Built with your nixpkgs |
 | `settings` | `{}` | TOML config, same keys as the file below |
-| `configFile` | `null` | Use this file instead of generating one from `settings` |
+| `configFile` | `null` | Use this file instead of generating one from `settings`; setting both is an error |
 | `target` | `"graphical-session.target"` | Target the services belong to |
 | `waylandDisplay` | `null` | `WAYLAND_DISPLAY` for the units, inherits by default |
 | `environment` | `{}` | Extra environment variables |
 | `path` | `[]` | Extra PATH entries |
 | `fetch.enable` | `true` | Fetch from a timer |
-| `fetch.onBoot` | `"15min"` | Delay after boot before the first fetch |
+| `fetch.delay` | `"15min"` | Delay after the session starts before the first fetch |
 | `fetch.interval` | `"12h"` | Time between fetches |
 | `rotate.enable` | `true` | Rotate from a timer |
 | `rotate.onCalendar` | `"*:0/6"` | Rotation schedule |
 | `startup.enable` | `true` | Apply at session start |
 | `startup.after` | `["awww-daemon.service"]` | Units the startup apply waits for |
-| `resume.enable` | `true` | Apply after suspend (on `suspend.target`) |
 
 Set `waylandDisplay = "wayland-1"` when the wallpaper daemon has to start
 before the compositor exports its socket.
+
+There is no resume unit. Systemd's user manager does not ship `sleep.target`
+or `suspend.target`, so a user-scope unit can never fire on suspend. awww
+keeps the current image across suspend; if your compositor clears it, add a
+system-level sleep hook that runs `wallpaper-guardian next`.
 
 ### Binary
 

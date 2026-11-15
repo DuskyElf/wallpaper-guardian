@@ -167,6 +167,15 @@ impl Pool {
     /// index.
     pub fn index_meta(&self, photos: &[Photo]) -> Result<()> {
         let mut entries = self.read_index();
+        let on_disk: HashSet<String> = self
+            .list()?
+            .iter()
+            .filter_map(|path| {
+                path.file_stem()
+                    .map(|stem| stem.to_string_lossy().into_owned())
+            })
+            .collect();
+        entries.retain(|hash, _| on_disk.contains(hash));
         let mut seen = HashSet::new();
         for photo in photos {
             if photo.description.is_empty() || !seen.insert(&photo.hash) {
@@ -357,6 +366,7 @@ mod tests {
             location: "Tokyo, Japan".to_string(),
             description: "First caption".to_string(),
         };
+        fs::write(temp.path().join(format!("{}.jpg", first.hash)), b"x").unwrap();
         pool.index_meta(std::slice::from_ref(&first)).unwrap();
 
         let captionless = Photo {
