@@ -1,3 +1,4 @@
+use std::collections::{BTreeMap, HashSet};
 use std::fs::{self, File};
 use std::io::Write;
 use std::path::{Path, PathBuf};
@@ -159,37 +160,52 @@ impl Pool {
         write_atomic(&self.dir.join("used"), b"")
     }
 
-    /// Replace the caption index. Rows are `hash<TAB>location<TAB>description`
-    /// and only photos with a description are kept, first non-empty wins.
+    /// Merge captions into the index. Rows are
+    /// `hash<TAB>location<TAB>description`. Only photos with a description
+    /// are written, first non-empty wins, and entries for photos outside this
+    /// fetch survive: an empty or caption-less gallery must not blank the
+    /// index.
     pub fn index_meta(&self, photos: &[Photo]) -> Result<()> {
-        let mut seen = std::collections::HashSet::new();
-        let mut rows = String::new();
+        let mut entries = self.read_index();
+        let mut seen = HashSet::new();
         for photo in photos {
             if photo.description.is_empty() || !seen.insert(&photo.hash) {
                 continue;
             }
-            rows.push_str(&format!(
-                "{}\t{}\t{}\n",
-                photo.hash, photo.location, photo.description
-            ));
+            entries.insert(
+                photo.hash.clone(),
+                (photo.location.clone(), photo.description.clone()),
+            );
+        }
+        let mut rows = String::new();
+        for (hash, (location, description)) in entries {
+            rows.push_str(&format!("{hash}\t{location}\t{description}\n"));
         }
         write_atomic(&self.dir.join("captions.tsv"), rows.as_bytes())
     }
 
     pub fn meta(&self, hash: &str) -> Option<Caption> {
-        let text = fs::read_to_string(self.dir.join("captions.tsv")).ok()?;
-        for line in text.lines() {
-            let mut parts = line.splitn(3, '\t');
-            let candidate = parts.next()?;
-            if candidate != hash {
-                continue;
-            }
-            return Some(Caption {
-                location: parts.next().unwrap_or_default().to_string(),
-                description: parts.next().unwrap_or_default().to_string(),
-            });
-        }
-        None
+        self.read_index()
+            .remove(hash)
+            .map(|(location, description)| Caption {
+                location,
+                description,
+            })
+    }
+
+    fn read_index(&self) -> BTreeMap<String, (String, String)> {
+        let Ok(text) = fs::read_to_string(self.dir.join("captions.tsv")) else {
+            return BTreeMap::new();
+        };
+        text.lines()
+            .filter_map(|line| {
+                let mut parts = line.splitn(3, '\t');
+                let hash = parts.next()?.to_string();
+                let location = parts.next().unwrap_or_default().to_string();
+                let description = parts.next().unwrap_or_default().to_string();
+                Some((hash, (location, description)))
+            })
+            .collect()
     }
 
     /// Refresh the overlay caption file for a photo. Removes it when the
@@ -327,6 +343,41 @@ mod tests {
         assert_eq!(
             fs::read_to_string(temp.path().join("caption.txt")).unwrap(),
             "A caption\n"
+        );
+    }
+
+    #[test]
+    fn index_merges_and_keeps_captions_across_fetches() {
+        let temp = tempfile::tempdir().unwrap();
+        let pool = pool(temp.path());
+        let first = Photo {
+            hash: "a".repeat(40),
+            url: String::new(),
+            width: 0,
+            location: "Tokyo, Japan".to_string(),
+            description: "First caption".to_string(),
+        };
+        pool.index_meta(std::slice::from_ref(&first)).unwrap();
+
+        let captionless = Photo {
+            hash: "b".repeat(40),
+            url: String::new(),
+            width: 0,
+            location: String::new(),
+            description: String::new(),
+        };
+        pool.index_meta(std::slice::from_ref(&captionless)).unwrap();
+        assert!(pool.meta(&first.hash).is_some());
+        assert!(pool.meta(&captionless.hash).is_none());
+
+        let updated = Photo {
+            description: "Second caption".to_string(),
+            ..first.clone()
+        };
+        pool.index_meta(std::slice::from_ref(&updated)).unwrap();
+        assert_eq!(
+            pool.meta(&first.hash).unwrap().description,
+            "Second caption"
         );
     }
 

@@ -468,6 +468,14 @@ fn symlinked_pool_directory_keeps_the_deck() {
         3,
         "deck repeated with a symlinked pool: {applied:?}"
     );
+    // `current` must keep the configured spelling. A canonicalized path here
+    // silently disables the cycle-start exclusion on the next pick.
+    assert!(
+        fixture.current().starts_with(&fixture.pool),
+        "current {} left the configured pool {}",
+        fixture.current().display(),
+        fixture.pool.display()
+    );
 }
 
 #[test]

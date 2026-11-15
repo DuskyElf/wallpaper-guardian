@@ -247,7 +247,7 @@ in
             OnBootSec = cfg.fetch.onBoot;
             OnUnitActiveSec = cfg.fetch.interval;
           };
-          Install.WantedBy = [ "timers.target" ];
+          Install.WantedBy = [ cfg.target ];
         };
       })
 
@@ -258,7 +258,7 @@ in
             PartOf = [ cfg.target ];
           };
           Timer.OnCalendar = cfg.rotate.onCalendar;
-          Install.WantedBy = [ "timers.target" ];
+          Install.WantedBy = [ cfg.target ];
         };
       })
     ];
