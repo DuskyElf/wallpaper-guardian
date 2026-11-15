@@ -5,7 +5,7 @@
 use std::fs;
 use std::io::{Read, Write};
 use std::net::TcpListener;
-use std::os::unix::fs::PermissionsExt;
+use std::os::unix::fs::{PermissionsExt, symlink};
 use std::path::PathBuf;
 use std::process::{Command, Output};
 use std::sync::Arc;
@@ -443,6 +443,30 @@ fn deck_shows_every_photo_once_before_repeating() {
             .photos()
             .iter()
             .any(|photo| { photo.as_os_str().to_string_lossy() == applied[3].as_str() })
+    );
+}
+
+#[test]
+fn symlinked_pool_directory_keeps_the_deck() {
+    let server = Server::start();
+    let fixture = Fixture::new(&server);
+    let real = fixture.dir.join("real-pool");
+    fs::create_dir(&real).unwrap();
+    symlink(&real, &fixture.pool).unwrap();
+
+    assert_success(&fixture.run(&["fetch"]));
+    for _ in 0..3 {
+        assert_success(&fixture.run(&["next"]));
+    }
+    let applied = fixture.applied();
+    assert_eq!(applied.len(), 3);
+    let mut distinct = applied.clone();
+    distinct.sort();
+    distinct.dedup();
+    assert_eq!(
+        distinct.len(),
+        3,
+        "deck repeated with a symlinked pool: {applied:?}"
     );
 }
 

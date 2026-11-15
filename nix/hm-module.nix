@@ -169,7 +169,7 @@ in
 
     systemd.user.services = lib.mkMerge [
       {
-        wallpaper-guardian-fetch = {
+        wallpaper-fetch = {
           Unit = {
             Description = "Fetch Guardian photos of the day into the wallpaper pool";
             PartOf = [ cfg.target ];
@@ -181,7 +181,7 @@ in
           };
         };
 
-        wallpaper-guardian-rotate = {
+        wallpaper-rotate = {
           Unit = {
             Description = "Rotate the Guardian wallpaper";
             PartOf = [ cfg.target ];
@@ -198,7 +198,7 @@ in
       }
 
       (lib.mkIf cfg.startup.enable {
-        wallpaper-guardian-startup = {
+        wallpaper-startup = {
           Unit = {
             Description = "Apply the initial wallpaper at session start";
             PartOf = [ cfg.target ];
@@ -215,7 +215,7 @@ in
       })
 
       (lib.mkIf cfg.resume.enable {
-        wallpaper-guardian-resume = {
+        wallpaper-resume = {
           Unit = {
             Description = "Re-apply the wallpaper after suspend";
             # suspend.target is reached on the way out, so this runs on
@@ -235,7 +235,7 @@ in
 
     systemd.user.timers = lib.mkMerge [
       (lib.mkIf cfg.fetch.enable {
-        wallpaper-guardian-fetch = {
+        wallpaper-fetch = {
           Unit = {
             Description = "Guardian wallpaper pool fetch";
             PartOf = [ cfg.target ];
@@ -252,7 +252,7 @@ in
       })
 
       (lib.mkIf cfg.rotate.enable {
-        wallpaper-guardian-rotate = {
+        wallpaper-rotate = {
           Unit = {
             Description = "Rotate the Guardian wallpaper";
             PartOf = [ cfg.target ];

@@ -48,8 +48,8 @@ impl Config {
             }
             None => Self::default(),
         };
-        config.resolve()?;
         config.validate()?;
+        config.resolve()?;
         Ok(config)
     }
 
@@ -320,6 +320,13 @@ mod tests {
     fn bad_regex_is_rejected() {
         let mut config = Config::default();
         config.source.title_pattern = "(".to_string();
+        assert!(config.validate().is_err());
+    }
+
+    #[test]
+    fn apply_args_need_a_file_placeholder() {
+        let mut config = Config::default();
+        config.apply.args = vec!["img".to_string()];
         assert!(config.validate().is_err());
     }
 
