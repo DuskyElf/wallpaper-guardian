@@ -1,0 +1,26 @@
+[package]
+name = "wallpaper-guardian"
+version = "0.1.0"
+edition = "2024"
+description = "Guardian photos-of-the-day wallpaper pool, slideshow and applier"
+repository = "https://github.com/DuskyElf/wallpaper-guardian"
+readme = "README.md"
+keywords = ["wallpaper", "wayland", "guardian", "systemd"]
+categories = ["command-line-utilities"]
+
+[dependencies]
+anyhow = "1.0.104"
+chrono = "0.4"
+clap = { version = "4.6.7", features = ["derive"] }
+ego-tree = "0.11"
+feed-rs = "3.0.0"
+fs2 = "0.4.3"
+rand = "0.10.3"
+regex = "1.13.1"
+reqwest = { version = "0.13.5", default-features = false, features = ["blocking", "gzip", "rustls"] }
+scraper = "0.29.0"
+serde = { version = "1.0.229", features = ["derive"] }
+toml = "1.2.1"
+
+[dev-dependencies]
+tempfile = "3.27.0"
