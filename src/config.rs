@@ -29,9 +29,9 @@ impl Config {
     /// file means "all defaults"; a missing explicit file is an error.
     pub fn load(explicit: Option<&Path>) -> Result<Self> {
         let path = match explicit {
-            Some(path) => Some(path.to_path_buf()),
+            Some(path) => Some(expand_tilde(path)),
             None => match env::var_os(ENV_CONFIG) {
-                Some(path) => Some(PathBuf::from(path)),
+                Some(path) => Some(expand_tilde(Path::new(&path))),
                 None => {
                     let path = default_config_path();
                     path.exists().then_some(path)
@@ -48,14 +48,17 @@ impl Config {
             }
             None => Self::default(),
         };
-        config.resolve();
+        config.resolve()?;
         config.validate()?;
         Ok(config)
     }
 
-    fn resolve(&mut self) {
-        self.pool.dir = expand_tilde(&self.pool.dir);
+    fn resolve(&mut self) -> Result<()> {
+        let dir = expand_tilde(&self.pool.dir);
+        self.pool.dir = std::path::absolute(&dir)
+            .with_context(|| format!("resolving pool.dir {}", dir.display()))?;
         self.caption.file = expand_tilde(&self.caption.file);
+        Ok(())
     }
 
     fn validate(&self) -> Result<()> {
@@ -82,8 +85,27 @@ impl Config {
         if self.source.timeout_secs == 0 || self.source.download_timeout_secs == 0 {
             bail!("source timeouts must be at least 1 second");
         }
+        if self.source.attempts == 0 || self.source.download_attempts == 0 {
+            bail!("source attempts must be at least 1");
+        }
+        if self
+            .source
+            .media_hosts
+            .iter()
+            .any(|host| host.trim().is_empty())
+        {
+            bail!("source.media_hosts contains an empty host");
+        }
         if self.apply.command.trim().is_empty() {
             bail!("apply.command must not be empty");
+        }
+        if !self
+            .apply
+            .args
+            .iter()
+            .any(|argument| argument.contains("{file}"))
+        {
+            bail!("apply.args must contain a {{file}} placeholder");
         }
         regex::Regex::new(&self.source.title_pattern)
             .context("source.title_pattern is not a valid regex")?;
@@ -127,8 +149,12 @@ pub struct SourceConfig {
     pub timeout_secs: u64,
     /// Timeout for photo downloads, in seconds.
     pub download_timeout_secs: u64,
-    /// Attempts per HTTP request, including the first one.
+    /// Attempts per feed or gallery request, including the first one.
     pub attempts: u32,
+    /// Attempts per photo download, including the first one.
+    pub download_attempts: u32,
+    /// RSS links must contain this substring. Empty disables the filter.
+    pub gallery_path: String,
     /// Only URLs containing one of these hosts are treated as photos.
     pub media_hosts: Vec<String>,
     /// RSS item titles that are galleries worth reading.
@@ -145,6 +171,8 @@ impl Default for SourceConfig {
             timeout_secs: 45,
             download_timeout_secs: 120,
             attempts: 2,
+            download_attempts: 3,
+            gallery_path: "/gallery/".to_string(),
             media_hosts: vec!["i.guim.co.uk".to_string()],
             title_pattern: r"(?i)photos? of the (day|weekend)".to_string(),
         }

@@ -6,7 +6,7 @@ use std::time::Duration;
 use anyhow::{Context, Result, bail};
 
 use crate::config::ApplyConfig;
-use crate::http::Log;
+use crate::log::Log;
 
 /// The wallpaper-applier seam. The command, its arguments and the daemon
 /// probe all come from configuration, so awww, swww, feh or a script are the
@@ -42,8 +42,8 @@ impl Applier {
             .stdin(Stdio::null())
             .stdout(Stdio::null())
             .stderr(Stdio::null());
-        // Detach from the unit's process group so the daemon outlives a
-        // oneshot service and does not receive its signals.
+        // Own process group keeps terminal signals away from the daemon.
+        // Surviving the oneshot unit itself is the module's KillMode=process.
         #[cfg(unix)]
         {
             use std::os::unix::process::CommandExt;

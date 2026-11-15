@@ -21,7 +21,11 @@
 
       # Home-manager only: no NixOS module required. Import this module and
       # set services.wallpaper-guardian.enable.
-      homeManagerModules.default = import ./nix/hm-module.nix { inherit self; };
+      homeManagerModules.default = ./nix/hm-module.nix;
+
+      checks = eachSystem (system: {
+        default = self.packages.${system}.default;
+      });
 
       overlays.default = final: _prev: {
         wallpaper-guardian = final.callPackage ./nix/package.nix { };

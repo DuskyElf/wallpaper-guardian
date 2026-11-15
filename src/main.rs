@@ -2,10 +2,10 @@ mod applier;
 mod config;
 mod http;
 mod lock;
+mod log;
 mod pool;
 mod source;
 
-use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
@@ -15,8 +15,9 @@ use rand::RngExt;
 
 use crate::applier::Applier;
 use crate::config::{Config, SelectMode};
-use crate::http::{Http, Log};
+use crate::http::Http;
 use crate::lock::PoolLock;
+use crate::log::Log;
 use crate::pool::Pool;
 use crate::source::Source;
 
@@ -135,9 +136,13 @@ fn fetch(config: &Config, source: &Source, pool: &Pool, http: &Http, log: Log) -
     let photos = source
         .fetch()
         .context("fetching galleries (pool left untouched)")?;
-    pool.index_meta(&photos)?;
+    if photos.is_empty() {
+        log.info("no photos found, keeping the caption index");
+    } else {
+        pool.index_meta(&photos)?;
+    }
     let saved = pool.save(&photos, http, log)?;
-    let pruned = pool.prune(config.pool.retention_days)?;
+    let pruned = pool.prune(config.pool.retention_days, log)?;
     log.info(format!(
         "{saved} new photos, {pruned} pruned, pool is now {} files",
         pool.count()?
@@ -212,7 +217,13 @@ fn pick_random(files: &[PathBuf], current: Option<&PathBuf>) -> PathBuf {
 }
 
 fn apply(config: &Config, pool: &Pool, applier: &Applier, file: &Path, log: Log) -> Result<()> {
-    let file = fs::canonicalize(file).with_context(|| format!("cannot find {}", file.display()))?;
+    // Absolute but not canonical: keep the same spelling as pool.list() so
+    // current/used comparisons survive a symlinked pool directory.
+    let file =
+        std::path::absolute(file).with_context(|| format!("resolving {}", file.display()))?;
+    if !file.exists() {
+        bail!("cannot find {}", file.display());
+    }
     if !applier.ensure()? {
         bail!(
             "no compositor session: `{}` probe failed",

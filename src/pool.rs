@@ -8,7 +8,8 @@ use anyhow::{Context, Result};
 use regex::Regex;
 
 use crate::config::{CaptionConfig, PoolConfig};
-use crate::http::{Http, Log};
+use crate::http::Http;
+use crate::log::Log;
 use crate::source::Photo;
 
 static EXT_RE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"/master/\d+\.(jpg|png)").unwrap());
@@ -76,8 +77,12 @@ impl Pool {
             }
             match http.bytes(&photo.url) {
                 Ok(bytes) if !bytes.is_empty() => {
-                    fs::write(&path, bytes)
-                        .with_context(|| format!("writing {}", path.display()))?;
+                    let part = path.with_extension(format!("{}.part", std::process::id()));
+                    fs::write(&part, bytes)
+                        .with_context(|| format!("writing {}", part.display()))?;
+                    fs::rename(&part, &path).with_context(|| {
+                        format!("renaming {} to {}", part.display(), path.display())
+                    })?;
                     saved += 1;
                     log.debug(format!("downloaded {} ({}px)", path.display(), photo.width));
                 }
@@ -88,8 +93,9 @@ impl Pool {
         Ok(saved)
     }
 
-    /// Remove photo files older than `retention_days` by mtime.
-    pub fn prune(&self, retention_days: u64) -> Result<usize> {
+    /// Remove photo files older than `retention_days` by mtime. A file that
+    /// cannot be removed is logged and skipped, matching the old pipeline.
+    pub fn prune(&self, retention_days: u64, log: Log) -> Result<usize> {
         let max_age = Duration::from_secs(retention_days.saturating_mul(86_400));
         let cutoff = SystemTime::now()
             .checked_sub(max_age)
@@ -105,7 +111,7 @@ impl Pool {
                     Ok(()) => removed += 1,
                     Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
                     Err(error) => {
-                        return Err(error).with_context(|| format!("removing {}", path.display()));
+                        log.info(format!("cannot remove {}: {error}", path.display()));
                     }
                 }
             }
@@ -257,12 +263,7 @@ fn photo_filename(photo: &Photo) -> String {
 
 /// Replace a small state file atomically so a reader never sees half a line.
 fn write_atomic(path: &Path, contents: &[u8]) -> Result<()> {
-    let temporary = path.with_extension(format!(
-        "{}.tmp",
-        path.extension()
-            .and_then(|extension| extension.to_str())
-            .unwrap_or_default()
-    ));
+    let temporary = path.with_extension(format!("{}.tmp", std::process::id()));
     {
         let mut handle = File::create(&temporary)
             .with_context(|| format!("creating {}", temporary.display()))?;

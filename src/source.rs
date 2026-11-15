@@ -9,7 +9,8 @@ use scraper::node::{Element, Node};
 use scraper::{ElementRef, Html, Selector};
 
 use crate::config::SourceConfig;
-use crate::http::{Http, Log};
+use crate::http::Http;
+use crate::log::Log;
 
 static HASH_RE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"/media/([a-f0-9]{40})/").unwrap());
 static WIDTH_RE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"[?&]width=(\d+)").unwrap());
@@ -86,6 +87,11 @@ impl Source {
                             let Some(link) = item.links.first() else {
                                 continue;
                             };
+                            if !self.config.gallery_path.is_empty()
+                                && !link.href.contains(&self.config.gallery_path)
+                            {
+                                continue;
+                            }
                             if seen_links.insert(link.href.clone()) {
                                 links.push(link.href.clone());
                             }

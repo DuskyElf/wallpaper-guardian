@@ -21,6 +21,8 @@ const HASH_A2: &str = "a222222222222222222222222222222222222222";
 const HASH_B1: &str = "b111111111111111111111111111111111111111";
 const HASH_NARROW: &str = "c111111111111111111111111111111111111111";
 const HASH_OLD: &str = "d111111111111111111111111111111111111111";
+const HASH_NG: &str = "e111111111111111111111111111111111111111";
+const HASH_C1: &str = "f111111111111111111111111111111111111111";
 
 struct Server {
     base: String,
@@ -60,9 +62,13 @@ impl Server {
 
 struct Content {
     rss: String,
+    rss_fallback: String,
+    rss_empty: String,
     gallery_a: String,
     gallery_b: String,
+    gallery_c: String,
     gallery_old: String,
+    not_gallery: String,
 }
 
 impl Content {
@@ -76,6 +82,7 @@ impl Content {
 <item><title>Photos of the weekend: test B</title><link>{base}/gallery/b</link><pubDate>{b}</pubDate></item>
 <item><title>Photos of the day: old</title><link>{base}/gallery/old</link><pubDate>{old}</pubDate></item>
 <item><title>Not a gallery at all</title><link>{base}/gallery/a</link><pubDate>{a}</pubDate></item>
+<item><title>Photos of the day: not a gallery</title><link>{base}/notgallery</link><pubDate>{a}</pubDate></item>
 </channel></rss>"#,
             a = now.to_rfc2822(),
             b = now.to_rfc2822(),
@@ -114,25 +121,71 @@ impl Content {
             figure(base, HASH_B1, 940, "", "Bare description", ""),
         ]);
         let gallery_old = page(&[figure(base, HASH_OLD, 1020, "Old", "Old gallery", "")]);
+        let gallery_c = page(&[figure(
+            base,
+            HASH_C1,
+            1020,
+            "Fallback",
+            "Only served as .json",
+            "",
+        )]);
+        let not_gallery = page(&[figure(
+            base,
+            HASH_NG,
+            1020,
+            "Nope",
+            "Not a gallery link",
+            "",
+        )]);
+
+        let rss_fallback = feed(base, "fallback", &format!("{base}/gallery/c"));
+        let rss_empty = feed(base, "empty", "");
 
         Self {
             rss,
+            rss_fallback,
+            rss_empty,
             gallery_a,
             gallery_b,
+            gallery_c,
             gallery_old,
+            not_gallery,
         }
     }
 
     fn route(&self, path: &str, target: &str) -> Option<Vec<u8>> {
         match path {
             "/series/x/rss" => Some(self.rss.clone().into_bytes()),
+            "/series/fallback/rss" => Some(self.rss_fallback.clone().into_bytes()),
+            "/series/empty/rss" => Some(self.rss_empty.clone().into_bytes()),
             "/gallery/a" => Some(self.gallery_a.clone().into_bytes()),
+            "/gallery/a.json" => Some(b"{}".to_vec()),
             "/gallery/b" => Some(self.gallery_b.clone().into_bytes()),
+            "/gallery/c.json" => Some(self.gallery_c.clone().into_bytes()),
             "/gallery/old" => Some(self.gallery_old.clone().into_bytes()),
+            "/notgallery" => Some(self.not_gallery.clone().into_bytes()),
             path if path.starts_with("/media/") => Some(format!("jpeg at {target}").into_bytes()),
             _ => None,
         }
     }
+}
+
+fn feed(base: &str, name: &str, gallery: &str) -> String {
+    let items = if gallery.is_empty() {
+        String::new()
+    } else {
+        format!(
+            "<item><title>Photos of the day: {name}</title><link>{gallery}</link><pubDate>{}</pubDate></item>",
+            Utc::now().to_rfc2822()
+        )
+    };
+    format!(
+        r#"<?xml version="1.0" encoding="UTF-8"?>
+<rss version="2.0"><channel>
+<title>Photos of the day</title><link>{base}/series/{name}</link><description>test</description>
+{items}
+</channel></rss>"#
+    )
 }
 
 fn page(figures: &[String]) -> String {
@@ -405,11 +458,17 @@ fn random_mode_avoids_an_immediate_repeat() {
     )
     .unwrap();
     assert_success(&fixture.run(&["fetch"]));
-    assert_success(&fixture.run(&["next"]));
-    assert_success(&fixture.run(&["next"]));
+    for _ in 0..20 {
+        assert_success(&fixture.run(&["next"]));
+    }
     let applied = fixture.applied();
-    assert_eq!(applied.len(), 2);
-    assert_ne!(applied[0], applied[1]);
+    assert_eq!(applied.len(), 20);
+    for pair in applied.windows(2) {
+        assert_ne!(
+            pair[0], pair[1],
+            "random mode repeated the current photo: {applied:?}"
+        );
+    }
 }
 
 #[test]
@@ -431,6 +490,11 @@ fn apply_sets_current_and_caption_and_missing_file_fails() {
         fixture.applied(),
         vec![photo.canonicalize().unwrap().display().to_string()]
     );
+
+    let unknown = fixture.pool.join(format!("{HASH_OLD}.jpg"));
+    fs::write(&unknown, b"unknown").unwrap();
+    assert_success(&fixture.run(&["apply", unknown.to_str().unwrap()]));
+    assert!(!fixture.pool.join("caption.txt").exists());
 
     let output = fixture.run(&["apply", fixture.dir.join("missing.jpg").to_str().unwrap()]);
     assert!(!output.status.success());
@@ -468,6 +532,107 @@ fn config_command_prints_effective_defaults() {
         "{stdout}"
     );
     assert!(stdout.contains("retention_days = 5"), "{stdout}");
+}
+
+#[test]
+fn fetch_is_idempotent() {
+    let server = Server::start();
+    let fixture = Fixture::new(&server);
+    assert_success(&fixture.run(&["fetch"]));
+    let captions = fs::read_to_string(fixture.pool.join("captions.tsv")).unwrap();
+    let output = fixture.run(&["fetch"]);
+    assert_success(&output);
+    assert!(
+        String::from_utf8_lossy(&output.stderr).contains("0 new photos"),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert_eq!(fixture.photos().len(), 3);
+    assert_eq!(
+        fs::read_to_string(fixture.pool.join("captions.tsv")).unwrap(),
+        captions
+    );
+}
+
+#[test]
+fn gallery_json_fallback_is_used() {
+    let server = Server::start();
+    let fixture = Fixture::new(&server);
+    fs::write(
+        &fixture.config,
+        fs::read_to_string(&fixture.config)
+            .unwrap()
+            .replace("/series/x", "/series/fallback"),
+    )
+    .unwrap();
+    let output = fixture.run(&["fetch"]);
+    assert_success(&output);
+    assert!(
+        String::from_utf8_lossy(&output.stderr).contains("1 new photos"),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let names: Vec<String> = fixture
+        .photos()
+        .iter()
+        .map(|path| path.file_name().unwrap().to_string_lossy().into_owned())
+        .collect();
+    assert_eq!(names, vec![format!("{HASH_C1}.jpg")]);
+}
+
+#[test]
+fn links_outside_the_gallery_path_are_ignored() {
+    let server = Server::start();
+    let fixture = Fixture::new(&server);
+    assert_success(&fixture.run(&["fetch"]));
+    assert!(
+        fixture
+            .photos()
+            .iter()
+            .all(|photo| { photo.file_stem().unwrap().to_string_lossy() != HASH_NG })
+    );
+}
+
+#[test]
+fn empty_fetch_keeps_the_caption_index() {
+    let server = Server::start();
+    let fixture = Fixture::new(&server);
+    assert_success(&fixture.run(&["fetch"]));
+    let captions = fs::read_to_string(fixture.pool.join("captions.tsv")).unwrap();
+    assert_eq!(captions.lines().count(), 3);
+
+    fs::write(
+        &fixture.config,
+        fs::read_to_string(&fixture.config)
+            .unwrap()
+            .replace("/series/x", "/series/empty"),
+    )
+    .unwrap();
+    let output = fixture.run(&["fetch"]);
+    assert_success(&output);
+    assert!(
+        String::from_utf8_lossy(&output.stderr).contains("keeping the caption index"),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert_eq!(
+        fs::read_to_string(fixture.pool.join("captions.tsv")).unwrap(),
+        captions
+    );
+}
+
+#[test]
+fn unknown_config_key_is_an_error() {
+    let server = Server::start();
+    let fixture = Fixture::new(&server);
+    fs::write(&fixture.config, "[source]\ndya = 2\n").unwrap();
+    let output = fixture.run(&["status"]);
+    assert!(!output.status.success());
+    assert!(
+        String::from_utf8_lossy(&output.stderr).contains("dya"),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
 }
 
 #[test]

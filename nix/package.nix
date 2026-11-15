@@ -4,9 +4,12 @@
   cacert,
 }:
 
+let
+  cargo = builtins.fromTOML (builtins.readFile ../Cargo.toml);
+in
 rustPlatform.buildRustPackage {
-  pname = "wallpaper-guardian";
-  version = "0.1.0";
+  pname = cargo.package.name;
+  version = cargo.package.version;
 
   src = lib.cleanSourceWith {
     src = ../.;
@@ -28,7 +31,7 @@ rustPlatform.buildRustPackage {
   '';
 
   meta = {
-    description = "Guardian photos-of-the-day wallpaper pool, slideshow and applier";
+    inherit (cargo.package) description;
     homepage = "https://github.com/DuskyElf/wallpaper-guardian";
     mainProgram = "wallpaper-guardian";
     platforms = lib.platforms.linux;

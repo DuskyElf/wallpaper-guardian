@@ -1,4 +1,3 @@
-use std::fmt::Display;
 use std::time::Duration;
 
 use anyhow::{Context, Result, anyhow};
@@ -6,33 +5,13 @@ use reqwest::blocking::Client;
 
 use crate::config::SourceConfig;
 
-#[derive(Clone, Copy, Debug)]
-pub struct Log {
-    verbose: bool,
-}
-
-impl Log {
-    pub fn new(verbose: bool) -> Self {
-        Self { verbose }
-    }
-
-    pub fn info(&self, message: impl Display) {
-        eprintln!("wallpaper-guardian: {message}");
-    }
-
-    pub fn debug(&self, message: impl Display) {
-        if self.verbose {
-            eprintln!("wallpaper-guardian: {message}");
-        }
-    }
-}
-
 /// Small blocking HTTP client: browser user agent, one timeout per request
 /// kind, retries with linear backoff. Returns the body of a 2xx response.
 #[derive(Clone)]
 pub struct Http {
     client: Client,
     attempts: u32,
+    download_attempts: u32,
     timeout: Duration,
     download_timeout: Duration,
 }
@@ -49,24 +28,25 @@ impl Http {
             .context("building the HTTP client")?;
         Ok(Self {
             client,
-            attempts: config.attempts.max(1),
+            attempts: config.attempts,
+            download_attempts: config.download_attempts,
             timeout: Duration::from_secs(config.timeout_secs),
             download_timeout: Duration::from_secs(config.download_timeout_secs),
         })
     }
 
     pub fn text(&self, url: &str) -> Result<String> {
-        let body = self.get(url, self.timeout)?;
+        let body = self.get(url, self.timeout, self.attempts)?;
         String::from_utf8(body).with_context(|| format!("{url} returned non-UTF-8 text"))
     }
 
     pub fn bytes(&self, url: &str) -> Result<Vec<u8>> {
-        self.get(url, self.download_timeout)
+        self.get(url, self.download_timeout, self.download_attempts)
     }
 
-    fn get(&self, url: &str, timeout: Duration) -> Result<Vec<u8>> {
+    fn get(&self, url: &str, timeout: Duration, attempts: u32) -> Result<Vec<u8>> {
         let mut last_error = None;
-        for attempt in 0..self.attempts {
+        for attempt in 0..attempts {
             let request = self.client.get(url).timeout(timeout);
             match request
                 .send()
@@ -78,7 +58,7 @@ impl Http {
                 },
                 Err(error) => last_error = Some(error.to_string()),
             }
-            if attempt + 1 < self.attempts {
+            if attempt + 1 < attempts {
                 std::thread::sleep(Duration::from_millis(1000 * u64::from(attempt + 1)));
             }
         }

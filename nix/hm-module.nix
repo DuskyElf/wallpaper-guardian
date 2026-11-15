@@ -1,4 +1,3 @@
-{ self }:
 {
   config,
   lib,
@@ -24,7 +23,9 @@ let
   environment =
     [ "PATH=${path}" ]
     ++ lib.optional (cfg.waylandDisplay != null) "WAYLAND_DISPLAY=${cfg.waylandDisplay}"
-    ++ lib.mapAttrsToList (name: value: "${name}=${value}") cfg.environment;
+    ++ lib.mapAttrsToList (
+      name: value: lib.escapeShellArg "${name}=${value}"
+    ) cfg.environment;
 in
 {
   options.services.wallpaper-guardian = {
@@ -32,8 +33,8 @@ in
 
     package = lib.mkOption {
       type = lib.types.package;
-      default = self.packages.${pkgs.stdenv.hostPlatform.system}.default;
-      defaultText = lib.literalExpression "wallpaper-guardian.packages.\${system}.default";
+      default = pkgs.callPackage ./package.nix { };
+      defaultText = lib.literalMD "the `wallpaper-guardian` package from this flake";
       description = "Package providing the `wallpaper-guardian` binary.";
     };
 
@@ -153,6 +154,13 @@ in
   };
 
   config = lib.mkIf cfg.enable {
+    assertions = [
+      {
+        assertion = cfg.configFile == null || cfg.settings == { };
+        message = "services.wallpaper-guardian: settings is ignored when configFile is set";
+      }
+    ];
+
     home.packages = [ cfg.package ];
 
     xdg.configFile."wallpaper-guardian/config.toml" = lib.mkIf (cfg.configFile == null) {
@@ -182,6 +190,9 @@ in
             Type = "oneshot";
             Environment = environment;
             ExecStart = "${exe}${configArgument} next";
+            # The applier may start a wallpaper daemon. Keep it alive when the
+            # oneshot unit exits instead of letting the cgroup take it down.
+            KillMode = "process";
           };
         };
       }
@@ -197,6 +208,7 @@ in
             Type = "oneshot";
             Environment = environment;
             ExecStart = "${exe}${configArgument} next";
+            KillMode = "process";
           };
           Install.WantedBy = [ cfg.target ];
         };
@@ -206,14 +218,17 @@ in
         wallpaper-guardian-resume = {
           Unit = {
             Description = "Re-apply the wallpaper after suspend";
-            After = [ "sleep.target" ];
+            # suspend.target is reached on the way out, so this runs on
+            # resume. sleep.target is the pre-suspend hook.
+            After = [ "suspend.target" ];
           };
           Service = {
             Type = "oneshot";
             Environment = environment;
             ExecStart = "${exe}${configArgument} next";
+            KillMode = "process";
           };
-          Install.WantedBy = [ "sleep.target" ];
+          Install.WantedBy = [ "suspend.target" ];
         };
       })
     ];
@@ -221,7 +236,13 @@ in
     systemd.user.timers = lib.mkMerge [
       (lib.mkIf cfg.fetch.enable {
         wallpaper-guardian-fetch = {
-          Unit.Description = "Guardian wallpaper pool fetch";
+          Unit = {
+            Description = "Guardian wallpaper pool fetch";
+            PartOf = [ cfg.target ];
+          };
+          # OnUnitActiveSec uses the monotonic clock, so suspend time does not
+          # count and a fetch fires shortly after wake when the interval
+          # passed while asleep. Persistent= would only help at boot.
           Timer = {
             OnBootSec = cfg.fetch.onBoot;
             OnUnitActiveSec = cfg.fetch.interval;
@@ -232,7 +253,10 @@ in
 
       (lib.mkIf cfg.rotate.enable {
         wallpaper-guardian-rotate = {
-          Unit.Description = "Rotate the Guardian wallpaper";
+          Unit = {
+            Description = "Rotate the Guardian wallpaper";
+            PartOf = [ cfg.target ];
+          };
           Timer.OnCalendar = cfg.rotate.onCalendar;
           Install.WantedBy = [ "timers.target" ];
         };

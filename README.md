@@ -41,9 +41,8 @@ carries the photo's location and description for overlays.
 ```
 
 The module only needs home-manager. It installs the binary, writes
-`$XDG_CONFIG_HOME/wallpaper-guardian/config.toml`, and creates four systemd
-user units: a fetch timer, a rotation timer, a session-start apply, and a
-resume apply.
+`$XDG_CONFIG_HOME/wallpaper-guardian/config.toml`, and creates four services
+plus two timers: fetch, rotation, session-start apply, and resume apply.
 
 | Option | Default | Meaning |
 | --- | --- | --- |
@@ -62,7 +61,7 @@ resume apply.
 | `rotate.onCalendar` | `"*:0/6"` | Rotation schedule |
 | `startup.enable` | `true` | Apply at session start |
 | `startup.after` | `["awww-daemon.service"]` | Units the startup apply waits for |
-| `resume.enable` | `true` | Apply after suspend |
+| `resume.enable` | `true` | Apply after suspend (on `suspend.target`) |
 
 Set `waylandDisplay = "wayland-1"` when the wallpaper daemon has to start
 before the compositor exports its socket.
@@ -96,6 +95,8 @@ missing explicit file is an error; a missing default file is fine.
 
 `fetch` exits non-zero when the feed itself cannot be read. The pool and its
 photos are left untouched in that case. A gallery page that fails is skipped.
+When a readable feed yields no usable photos, the caption index is kept so a
+bad filter cannot blank every caption.
 
 ## Configuration
 
@@ -142,7 +143,9 @@ without_location = "{description}"
 | `user_agent` | Chrome user agent | Sent with every request |
 | `timeout_secs` | `45` | Timeout for feeds and gallery pages |
 | `download_timeout_secs` | `120` | Timeout for a photo download |
-| `attempts` | `2` | Attempts per request, including the first |
+| `attempts` | `2` | Attempts per feed or gallery request, including the first |
+| `download_attempts` | `3` | Attempts per photo download, including the first |
+| `gallery_path` | `"/gallery/"` | RSS links must contain this substring; empty disables the check |
 | `media_hosts` | `["i.guim.co.uk"]` | Hosts whose URLs count as photos; empty accepts any host |
 | `title_pattern` | `(?i)photos? of the (day\|weekend)` | RSS titles worth reading |
 
@@ -160,8 +163,8 @@ without_location = "{description}"
 | `daemon_tries` | `10` | Readiness probes before giving up |
 
 `apply.command` is not tied to awww. Point it at `swww`, `hyprpaper`, or a
-script and set `args` accordingly. `ensure_daemon = false` skips the probe and
-daemon start entirely.
+script and set `args` accordingly. One argument must contain `{file}`.
+`ensure_daemon = false` skips the probe and daemon start entirely.
 
 ### `[select]`
 
@@ -179,6 +182,13 @@ daemon start entirely.
 
 Templates accept `{location}` and `{description}`. The file is rewritten on
 every apply and removed when the photo has no description.
+
+Overlays such as Quickshell read the default
+`$XDG_CACHE_HOME/wallpaper-guardian/caption.txt`. If you move `pool.dir` or
+`caption.file`, point the overlay at the new path.
+
+Keep `retention_days` at or above `source.days`; with a shorter retention the
+same photos are downloaded again on every fetch.
 
 ## Pool layout
 
