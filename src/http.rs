@@ -39,6 +39,9 @@ pub struct Http {
 
 impl Http {
     pub fn new(config: &SourceConfig) -> Result<Self> {
+        // rustls needs a process-wide crypto provider; installation fails
+        // harmlessly when another caller already did it.
+        let _ = rustls::crypto::ring::default_provider().install_default();
         let client = Client::builder()
             .user_agent(&config.user_agent)
             .timeout(Duration::from_secs(config.timeout_secs))

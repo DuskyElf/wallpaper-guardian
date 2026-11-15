@@ -1,6 +1,7 @@
 {
   lib,
   rustPlatform,
+  cacert,
 }:
 
 rustPlatform.buildRustPackage {
@@ -18,6 +19,13 @@ rustPlatform.buildRustPackage {
   };
 
   cargoLock.lockFile = ../Cargo.lock;
+
+  # The test suite only speaks HTTP, but reqwest builds its TLS verifier when
+  # the client is created, and the sandbox has no system certificate store.
+  nativeCheckInputs = [ cacert ];
+  preCheck = ''
+    export SSL_CERT_FILE=${cacert}/etc/ssl/certs/ca-bundle.crt
+  '';
 
   meta = {
     description = "Guardian photos-of-the-day wallpaper pool, slideshow and applier";
